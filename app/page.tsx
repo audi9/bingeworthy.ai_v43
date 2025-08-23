@@ -120,6 +120,7 @@ export default function HomePage() {
 
       const result = await response.json()
       console.log("📊 FRONTEND: API response data:", result)
+      // console.log("📊 FRONTEND: API response data:", result.data)
 
       if (result.success) {
         console.log("✅ FRONTEND: Search successful, setting content:", result.data?.length || 0, "items")
@@ -260,13 +261,14 @@ export default function HomePage() {
               {/* Quick filter buttons */}
               <div className="flex flex-wrap gap-2 justify-center mt-6">
                 {[
-                  "Netflix originals",
-                  "HBO Max series",
-                  "Marvel movies",
-                  "Korean dramas",
-                  "British period dramas",
-                  "Sci-fi thrillers",
-                  "True crime documentaries",
+                  "Netflix",
+                  "HBO Max",
+                  "Marvel",
+                  "Korean",
+                  "British",
+                  "Sci-fi",
+                  "Comedy",
+                  "Romentic Comedy",
                 ].map((filter) => (
                   <Button
                     key={filter}

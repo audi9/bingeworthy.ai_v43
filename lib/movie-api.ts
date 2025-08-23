@@ -1,4 +1,8 @@
 import type { Content, TMDBMovie, TMDBTVShow, APIResponse, SearchFilters } from "./types"
+import { fetchFromTMDB } from "./tmdb"
+import { fetchFromOMDB } from "./omdb"
+import { fetchFromGoogle } from "./google"
+import { cleanQueryWithLLM } from "./llm"
 
 // TMDB API configuration - Free API with 1000 requests per day
 const TMDB_BASE_URL = "https://api.themoviedb.org/3"
@@ -6,7 +10,7 @@ const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
 
 // You can get your free TMDB API key from: https://www.themoviedb.org/settings/api
 // Free tier: 1000 requests per day, no expiration
-const TMDB_API_KEY = process.env.TMDB_API_KEY || "your_tmdb_api_key_here"
+const TMDB_API_KEY = `${process.env.TMDB_API_KEY}`
 
 // Genre mapping from TMDB IDs to names
 const GENRE_MAP: Record<number, string> = {
@@ -44,26 +48,26 @@ const STREAMING_PLATFORMS = [
 ]
 
 const LANGUAGE_CODES: Record<string, string> = {
-  hindi: "hi",
-  english: "en",
-  spanish: "es",
-  french: "fr",
-  german: "de",
-  italian: "it",
-  japanese: "ja",
-  korean: "ko",
-  chinese: "zh",
-  portuguese: "pt",
-  russian: "ru",
-  arabic: "ar",
-  tamil: "ta",
-  telugu: "te",
-  bengali: "bn",
-  marathi: "mr",
-  gujarati: "gu",
-  punjabi: "pa",
-  malayalam: "ml",
-  kannada: "kn",
+  "hindi": "hi-IN",
+  "english": "en-US",
+  "spanish": "es-ES",
+  "french": "fr-FR",
+  "german": "de-DE",
+  "italian": "it-IT",
+  "japanese": "ja-JP",
+  "korean": "ko-KR",
+  "chinese": "zh-CN",
+  "portuguese": "pt-PT",
+  "russian": "ru-RU",
+  "arabic": "ar-SA",
+  "tamil": "ta-IN",
+  "telugu": "te-IN",
+  "bengali": "bn-IN",
+  "marathi": "mr-IN",
+  "gujarati": "gu-IN",
+  "punjabi": "pa-IN",
+  "malayalam": "ml-IN",
+  "kannada": "kn-IN"
 }
 
 /**
@@ -77,29 +81,40 @@ export async function fetchTrendingContent(
   page = 1,
 ): Promise<APIResponse<Content[]>> {
   try {
-    const [moviesResponse, tvResponse] = await Promise.all([
-      fetch(`${TMDB_BASE_URL}/trending/movie/${timeWindow}?api_key=${TMDB_API_KEY}&page=${page}`),
-      fetch(`${TMDB_BASE_URL}/trending/tv/${timeWindow}?api_key=${TMDB_API_KEY}&page=${page}`),
-    ])
+    let resultsLength = 0
+    let minResults = 50
+    let allContent: any[] = [];
+    // since each page returns only 20 results, so looping upto 50 results
+    // also TMDB Pages start at 1 and max at 500 so to avoid error setting page <=500
+    while (resultsLength < minResults && page <=500) {
+      
+      const [moviesResponse, tvResponse] = await Promise.all([
+        fetch(`${TMDB_BASE_URL}/trending/movie/${timeWindow}?api_key=${TMDB_API_KEY}&page=${page}`),
+        fetch(`${TMDB_BASE_URL}/trending/tv/${timeWindow}?api_key=${TMDB_API_KEY}&page=${page}`),
+      ])
 
-    if (!moviesResponse.ok || !tvResponse.ok) {
-      throw new Error("Failed to fetch trending content")
+      if (!moviesResponse.ok || !tvResponse.ok) {
+        throw new Error("Failed to fetch trending content")
+      }
+
+      const moviesData = await moviesResponse.json()
+      const tvData = await tvResponse.json()
+
+      // Convert TMDB data to our Content interface
+      const movies: Content[] = moviesData.results.map((movie: TMDBMovie) => convertTMDBMovieToContent(movie))
+
+      const tvShows: Content[] = tvData.results.map((show: TMDBTVShow) => convertTMDBTVToContent(show))
+
+      // Combine and sort by rating
+      allContent = [...movies, ...tvShows].sort((a, b) => b.tmdb_rating - a.tmdb_rating)
+      resultsLength = allContent.length;
+      if (page >= moviesData.total_pages + tvData.total_pages)
+        break; // Stop if no more pages
+      page++;
     }
-
-    const moviesData = await moviesResponse.json()
-    const tvData = await tvResponse.json()
-
-    // Convert TMDB data to our Content interface
-    const movies: Content[] = moviesData.results.map((movie: TMDBMovie) => convertTMDBMovieToContent(movie))
-
-    const tvShows: Content[] = tvData.results.map((show: TMDBTVShow) => convertTMDBTVToContent(show))
-
-    // Combine and sort by rating
-    const allContent = [...movies, ...tvShows].sort((a, b) => b.tmdb_rating - a.tmdb_rating)
-
     return {
       success: true,
-      data: allContent.slice(0, 20), // Return top 20 items
+      data: allContent, // Return top 20 items
     }
   } catch (error) {
     console.error("Error fetching trending content:", error)
@@ -113,11 +128,11 @@ export async function fetchTrendingContent(
 /**
  * Main search function with LLM-powered query interpretation
  */
-export async function searchContent(query: string, filters?: SearchFilters): Promise<APIResponse<Content[]>> {
+export async function searchContent(query: string, filters: SearchFilters): Promise<APIResponse<Content[]>> {
   try {
     console.log(`🚀 Starting search for: "${query}" with filters:`, filters)
 
-    if (!TMDB_API_KEY || TMDB_API_KEY === "your_tmdb_api_key_here") {
+    if (!TMDB_API_KEY) {
       console.error("❌ TMDB API key is not configured")
       return {
         success: false,
@@ -125,7 +140,7 @@ export async function searchContent(query: string, filters?: SearchFilters): Pro
       }
     }
 
-    console.log(`🔑 Using API key: ${TMDB_API_KEY.substring(0, 8)}...`)
+    // console.log(`🔑 Using API key: ${TMDB_API_KEY.substring(0, 8)}...`)
 
     const allResults: Content[] = []
     let currentPage = 1
@@ -135,11 +150,23 @@ export async function searchContent(query: string, filters?: SearchFilters): Pro
 
     // Search movies across all pages
     while (hasMoreResults) {
-      console.log(`🎬 Searching movies page ${currentPage}`)
+      // console.log(`🎬 Searching movies page ${currentPage}`)
       const movieResponse = await searchMovies(query, filters, currentPage)
 
       if (movieResponse.success && movieResponse.data && movieResponse.data.length > 0) {
+        
         allResults.push(...movieResponse.data)
+        const filteredResults = applyFilters(allResults, filters)
+        const sortedResults = filteredResults.sort((a, b) => {
+          // Primary sort by TMDB rating
+          if (b.tmdb_rating !== a.tmdb_rating) {
+            return b.tmdb_rating - a.tmdb_rating
+          }
+          // Secondary sort by IMDB rating
+          return b.imdb_rating - a.imdb_rating
+        })
+        sortedResults.push(...movieResponse.data)
+       
         currentPage++
 
         // TMDB typically returns 20 results per page, if less than 20, we've reached the end
@@ -160,11 +187,22 @@ export async function searchContent(query: string, filters?: SearchFilters): Pro
 
     // Search TV shows across all pages
     while (hasMoreResults) {
-      console.log(`📺 Searching TV shows page ${currentPage}`)
+      // console.log(`📺 Searching TV shows page ${currentPage}`)
       const tvResponse = await searchTVShows(query, filters, currentPage)
 
       if (tvResponse.success && tvResponse.data && tvResponse.data.length > 0) {
         allResults.push(...tvResponse.data)
+
+        const filteredResults = applyFilters(allResults, filters)
+        const sortedResults = filteredResults.sort((a, b) => {
+          // Primary sort by TMDB rating
+          if (b.tmdb_rating !== a.tmdb_rating) {
+            return b.tmdb_rating - a.tmdb_rating
+          }
+          // Secondary sort by IMDB rating
+          return b.imdb_rating - a.imdb_rating
+        })
+        sortedResults.push(...tvResponse.data)
         currentPage++
 
         if (tvResponse.data.length < 20) {
@@ -191,21 +229,50 @@ export async function searchContent(query: string, filters?: SearchFilters): Pro
         }
       }
     }
+    // 1. Clean/expand query with LLM
+    const llmResponse = await cleanQueryWithLLM(query)
+    const llmResults = llmResponse.data || []; // extract the array safely
 
+    // 2. Run searches in parallel
+    // const [tmdbResults, omdbResults, googleResults] = await Promise.all([
+      // fetchFromTMDB(cleanedQuery),
+    //   fetchFromOMDB(cleanedQuery),
+    //   fetchFromGoogle(cleanedQuery),
+    // ])
+
+    // 3. Combine all
+    // const merged = mergeResults([...allResults, ...llmResults])
+    // Merge: Start with TMDB results, then add unique LLM ones
+     
+    // console.log("llmResponse.data", llmResponse.data);
+    console.log("TMDB count:", allResults.length);
+    console.log("LLM count:", llmResults.length);
+    const mergedResults = [
+      ...allResults,
+      ...llmResults.filter(
+        (llmItem) =>
+          !allResults.some(
+            (tmdbItem) =>
+              tmdbItem.title.toLowerCase() === llmItem.title.toLowerCase()
+          )
+      ),
+    ]
+    console.log("mergedResults = ", mergedResults.length)  
+        
     // Apply filters to all results
-    const filteredResults = applyFilters(allResults, filters)
-    console.log(`🔍 Results after filtering: ${filteredResults.length}`)
+    const filteredResults = applyFilters(mergedResults, filters)
+    // console.log(`🔍 Results after filtering: ${filteredResults.length}`)
 
     const sortedResults = filteredResults.sort((a, b) => {
-      // Primary sort by TMDB rating
-      if (b.tmdb_rating !== a.tmdb_rating) {
-        return b.tmdb_rating - a.tmdb_rating
+      // Primary sort by IMDB rating
+      if (b.imdb_rating !== a.imdb_rating) {
+        return b.imdb_rating - a.imdb_rating
       }
-      // Secondary sort by IMDB rating
-      return b.imdb_rating - a.imdb_rating
+      // Secondary sort by TMDB rating
+      return b.tmdb_rating - a.tmdb_rating
     })
 
-    console.log(`✅ Returning ALL ${sortedResults.length} results sorted by ratings`)
+    // console.log(`✅ Returning ALL ${sortedResults.length} results sorted by ratings`)
 
     if (sortedResults.length === 0) {
       return {
@@ -215,10 +282,11 @@ export async function searchContent(query: string, filters?: SearchFilters): Pro
       }
     }
 
+    // console.log("Final sortedResults ", sortedResults.length)
     return {
       success: true,
       data: sortedResults, // Return ALL results, no slicing
-      message: `Found ${sortedResults.length} results`,
+      error: `Found ${sortedResults.length} results`,
     }
   } catch (error) {
     console.error("❌ Search error:", error)
@@ -232,14 +300,14 @@ export async function searchContent(query: string, filters?: SearchFilters): Pro
 /**
  * Searches for movies using TMDB API with pagination
  */
-async function searchMovies(query: string, filters?: SearchFilters, page = 1): Promise<APIResponse<Content[]>> {
+export async function searchMovies(query: string, filters?: SearchFilters, page = 1): Promise<APIResponse<Content[]>> {
   try {
-    if (!TMDB_API_KEY || TMDB_API_KEY === "your_tmdb_api_key_here") {
+    if (!TMDB_API_KEY) {
       return { success: false, error: "TMDB API key is not configured" }
     }
 
     const url = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&include_adult=false&page=${page}`
-    console.log(`🎬 Searching movies: ${url.replace(TMDB_API_KEY, "[API_KEY]")}`)
+    console.log(`🎬 Searching movies: ${url.replace(TMDB_API_KEY, TMDB_API_KEY)}`)
 
     const response = await fetch(url)
 
@@ -279,12 +347,12 @@ async function searchMovies(query: string, filters?: SearchFilters, page = 1): P
  */
 async function searchTVShows(query: string, filters?: SearchFilters, page = 1): Promise<APIResponse<Content[]>> {
   try {
-    if (!TMDB_API_KEY || TMDB_API_KEY === "your_tmdb_api_key_here") {
+    if (!TMDB_API_KEY) {
       return { success: false, error: "TMDB API key is not configured" }
     }
 
     const url = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&include_adult=false&page=${page}`
-    console.log(`📺 Searching TV shows: ${url.replace(TMDB_API_KEY, "[API_KEY]")}`)
+    console.log(`📺 Searching TV shows: ${url.replace(TMDB_API_KEY, TMDB_API_KEY)}`)
 
     const response = await fetch(url)
 
@@ -359,7 +427,7 @@ export async function fetchContentDetails(id: number, type: "movie" | "tv"): Pro
  */
 export async function getTrendingContent(): Promise<APIResponse<Content[]>> {
   try {
-    if (!TMDB_API_KEY || TMDB_API_KEY === "your_tmdb_api_key_here") {
+    if (!TMDB_API_KEY) {
       console.warn("⚠️ TMDB API key is not configured for trending content")
       return {
         success: false,
@@ -394,7 +462,7 @@ export async function getTrendingContent(): Promise<APIResponse<Content[]>> {
     return {
       success: true,
       data: combinedResults.slice(0, 100),
-      message: "Successfully fetched trending content",
+      error: "Successfully fetched trending content",
     }
   } catch (error) {
     console.error("❌ Trending content error:", error)
@@ -413,7 +481,7 @@ export async function getTrendingContent(): Promise<APIResponse<Content[]>> {
  * Applies search filters to content array with simplified and improved matching
  */
 function applyFilters(content: Content[], filters: SearchFilters): Content[] {
-  console.log(`🔧 Applying filters to ${content.length} items:`, filters)
+  // console.log(`🔧 Applying filters to ${content.length} items:`, filters)
 
   const filteredContent = content.filter((item) => {
     // Filter by type (movie/tv)
@@ -491,7 +559,7 @@ function applyFilters(content: Content[], filters: SearchFilters): Content[] {
     return true
   })
 
-  console.log(`🎯 Filtered from ${content.length} to ${filteredContent.length} items`)
+  // console.log(`🎯 Filtered from ${content.length} to ${filteredContent.length} items`)
   return filteredContent
 }
 
@@ -749,7 +817,7 @@ async function fetchTrailerUrl(id: number, type: "movie" | "tv"): Promise<string
       return `https://www.youtube.com/watch?v=${trailer.key}`
     }
 
-    console.log(`No trailer found for ${type} ${id}`)
+    // console.log(`No trailer found for ${type} ${id}`)
     return undefined
   } catch (error) {
     console.error(`Error fetching trailer for ${type} ${id}:`, error)
@@ -928,7 +996,7 @@ function parseQueryIntelligently(
       if (queryLower.includes(`${langName} movies`) || queryLower.includes(`${langName} shows`)) {
         useDiscoverAPI = true
         reasoning = `Language-specific content discovery for ${langName}`
-        searchTerms = undefined
+        searchTerms = ""
       }
       break
     }
@@ -953,7 +1021,7 @@ function parseQueryIntelligently(
       if (hasTopPattern || queryLower.includes(`${genre} movies`) || queryLower.includes(`${genre} shows`)) {
         useDiscoverAPI = true
         reasoning = `Genre-based discovery for ${genre}`
-        searchTerms = undefined
+        searchTerms = ""
       }
       break
     }
@@ -967,7 +1035,7 @@ function parseQueryIntelligently(
       if (hasTopPattern) {
         useDiscoverAPI = true
         reasoning = `Platform-specific discovery for ${platform}`
-        searchTerms = undefined
+        searchTerms = ""
       }
       break
     }
@@ -990,7 +1058,7 @@ function parseQueryIntelligently(
   if (hasTopPattern && Object.keys(enhancedFilters).length > 0) {
     useDiscoverAPI = true
     reasoning = "Top-rated content discovery with filters"
-    searchTerms = undefined
+    searchTerms = ""
   }
 
   console.log("🧠 Intelligent parsing result:", { searchTerms, enhancedFilters, useDiscoverAPI, reasoning })
@@ -1118,3 +1186,77 @@ async function discoverContent(searchIntent: any, filters: SearchFilters): Promi
     }
   }
 }
+
+
+// Updated code to include google search results
+
+export interface SearchResult {
+  id: string
+  title: string
+  type: "movie" | "tv"
+  year?: number
+  overview?: string
+  poster?: string
+  sourceRatings: {
+    tmdb?: number
+    imdb?: number
+    google?: number
+  }
+  averageRating?: number
+}
+
+/**
+ * Merge and deduplicate search results from multiple sources
+ */
+function mergeResults(results: SearchResult[]): SearchResult[] {
+  const map = new Map<string, SearchResult>()
+
+  for (const item of results) {
+    const key = `${item.title.toLowerCase()}_${item.year || ""}`
+
+    if (!map.has(key)) {
+      map.set(key, { ...item })
+    } else {
+      const existing = map.get(key)!
+      existing.sourceRatings = {
+        ...existing.sourceRatings,
+        ...item.sourceRatings,
+      }
+
+      // Recompute average
+      const ratings = Object.values(existing.sourceRatings).filter(Boolean) as number[]
+      existing.averageRating =
+        ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : undefined
+
+      map.set(key, existing)
+    }
+  }
+
+  return Array.from(map.values())
+}
+
+/**
+ * Main search function
+ */
+// export async function searchContent1(query: string, filters: SearchFilters) {
+//   console.log("Inside movies-api.ts-->searchContent() -- Line#1210")
+//   try {
+//     // 1. Clean/expand query with LLM
+//     const cleanedQuery = await cleanQueryWithLLM(query)
+
+//     // 2. Run searches in parallel
+//     const [tmdbResults, omdbResults, googleResults] = await Promise.all([
+//       fetchFromTMDB(cleanedQuery),
+//       fetchFromOMDB(cleanedQuery),
+//       fetchFromGoogle(cleanedQuery),
+//     ])
+
+//     // 3. Combine all
+//     const merged = mergeResults([...tmdbResults, ...omdbResults, ...googleResults])
+
+//     return { success: true, data: merged }
+//   } catch (err: any) {
+//     console.error("❌ searchContent error:", err)
+//     return { success: false, error: err.message || "Search failed" }
+//   }
+// }
