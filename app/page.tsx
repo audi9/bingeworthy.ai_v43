@@ -226,7 +226,7 @@ export default function HomePage() {
                   <Input
                     placeholder="Search for movies, shows, actors, or describe what you want to watch..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    // onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyPress={(e) => e.key === "Enter" && handleSearch()}
                     onFocus={() => setShowSuggestions(true)}
                     onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
@@ -256,7 +256,7 @@ export default function HomePage() {
                 </Button>
               </div>
 
-              <IndividualFilters filters={filters} onFiltersChange={handleFiltersChange} />
+              {/* <IndividualFilters filters={filters} onFiltersChange={handleFiltersChange} /> */}
 
               {/* Quick filter buttons */}
               <div className="flex flex-wrap gap-2 justify-center mt-6">
