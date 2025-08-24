@@ -226,7 +226,7 @@ export default function HomePage() {
                   <Input
                     placeholder="Search for movies, shows, actors, or describe what you want to watch..."
                     value={searchQuery}
-                    // onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyPress={(e) => e.key === "Enter" && handleSearch()}
                     onFocus={() => setShowSuggestions(true)}
                     onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
@@ -264,11 +264,12 @@ export default function HomePage() {
                   "Netflix",
                   "HBO Max",
                   "Marvel",
-                  "Korean",
+                  "Hindi",
                   "British",
                   "Sci-fi",
                   "Comedy",
                   "Romentic Comedy",
+                  "Documentary"
                 ].map((filter) => (
                   <Button
                     key={filter}

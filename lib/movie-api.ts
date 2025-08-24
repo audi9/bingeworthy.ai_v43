@@ -106,7 +106,7 @@ export async function fetchTrendingContent(
       const tvShows: Content[] = tvData.results.map((show: TMDBTVShow) => convertTMDBTVToContent(show))
 
       // Combine and sort by rating
-      allContent = [...movies, ...tvShows].sort((a, b) => b.tmdb_rating - a.tmdb_rating)
+      allContent = [...movies, ...tvShows].sort((a, b) => b.release_year - a.release_year)
       resultsLength = allContent.length;
       if (page >= moviesData.total_pages + tvData.total_pages)
         break; // Stop if no more pages
@@ -158,12 +158,19 @@ export async function searchContent(query: string, filters: SearchFilters): Prom
         allResults.push(...movieResponse.data)
         const filteredResults = applyFilters(allResults, filters)
         const sortedResults = filteredResults.sort((a, b) => {
-          // Primary sort by TMDB rating
-          if (b.tmdb_rating !== a.tmdb_rating) {
-            return b.tmdb_rating - a.tmdb_rating
+          // // Primary sort by TMDB rating
+          // if (b.tmdb_rating !== a.tmdb_rating) {
+          //   return b.tmdb_rating - a.tmdb_rating
+          // }
+          // // Secondary sort by IMDB rating
+          // return b.imdb_rating - a.imdb_rating
+           // Primary sort by TMDB rating
+          if (b.release_year !== a.release_year) {
+            return b.release_year - a.release_year
           }
           // Secondary sort by IMDB rating
-          return b.imdb_rating - a.imdb_rating
+          // return b.imdb_rating - a.imdb_rating
+          return b.release_year - a.release_year
         })
         sortedResults.push(...movieResponse.data)
        
@@ -196,11 +203,18 @@ export async function searchContent(query: string, filters: SearchFilters): Prom
         const filteredResults = applyFilters(allResults, filters)
         const sortedResults = filteredResults.sort((a, b) => {
           // Primary sort by TMDB rating
-          if (b.tmdb_rating !== a.tmdb_rating) {
-            return b.tmdb_rating - a.tmdb_rating
+         // if (b.tmdb_rating !== a.tmdb_rating) {
+          //   return b.tmdb_rating - a.tmdb_rating
+          // }
+          // // Secondary sort by IMDB rating
+          // return b.imdb_rating - a.imdb_rating
+           // Primary sort by TMDB rating
+          if (b.release_year !== a.release_year) {
+            return b.release_year - a.release_year
           }
           // Secondary sort by IMDB rating
-          return b.imdb_rating - a.imdb_rating
+          // return b.imdb_rating - a.imdb_rating
+          return b.release_year - a.release_year
         })
         sortedResults.push(...tvResponse.data)
         currentPage++
@@ -265,11 +279,17 @@ export async function searchContent(query: string, filters: SearchFilters): Prom
 
     const sortedResults = filteredResults.sort((a, b) => {
       // Primary sort by IMDB rating
-      if (b.imdb_rating !== a.imdb_rating) {
-        return b.imdb_rating - a.imdb_rating
+      // if (b.imdb_rating !== a.imdb_rating) {
+      //   return b.imdb_rating - a.imdb_rating
+      // }
+      // // Secondary sort by TMDB rating
+      // return b.tmdb_rating - a.tmdb_rating
+
+      if (b.release_year !== a.release_year) {
+        return b.release_year - a.release_year
       }
-      // Secondary sort by TMDB rating
-      return b.tmdb_rating - a.tmdb_rating
+      // Secondary sort by TMDB release_year
+      return b.release_year - a.release_year
     })
 
     // console.log(`✅ Returning ALL ${sortedResults.length} results sorted by ratings`)
@@ -455,7 +475,7 @@ export async function getTrendingContent(): Promise<APIResponse<Content[]>> {
     const tvShows: Content[] = tvData.results.map((show: TMDBTVShow) => convertTMDBTVToContent(show))
 
     // Combine and sort by rating
-    const combinedResults = [...movies, ...tvShows].sort((a, b) => b.tmdb_rating - a.tmdb_rating)
+    const combinedResults = [...movies, ...tvShows].sort((a, b) => b.release_year - a.release_year)
 
     console.log(`✅ Successfully fetched ${combinedResults.length} trending items`)
 
@@ -549,7 +569,7 @@ function applyFilters(content: Content[], filters: SearchFilters): Content[] {
     }
 
     // Filter by year - allow 1 year tolerance
-    if (filters.year && filters.year > 1900) {
+    if (filters.year && filters.year > 1990) {
       const yearDiff = Math.abs(item.release_year - filters.year)
       if (yearDiff > 1) {
         return false
